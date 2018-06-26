@@ -1,8 +1,8 @@
 {
   "name": "ntfs-reader",
-  "version": "0.0.0",
+  "version": "1.0.0",
   "author": "rwson <rw_Song@sina.com>",
-  "description": "An electron-vue project",
+  "description": "Mac平台下的NTFS文件系统驱动",
   "license": null,
   "main": "./dist/electron/main.js",
   "scripts": {
