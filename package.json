@@ -51,9 +51,9 @@
     }
   },
   "dependencies": {
-    "@mh-cbon/sudo-fs": "^1.0.17",
     "element-ui": "^2.4.1",
-    "sudo": "^1.0.3",
+    "nodejs-disks": "^0.2.1",
+    "python-shell": "^0.5.0",
     "vue": "^2.3.3"
   },
   "devDependencies": {

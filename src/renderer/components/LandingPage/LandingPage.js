@@ -1,257 +1,164 @@
-import fs from 'fs';
-import cp from 'child_process';
-import sudo from 'sudo';
-import fsSudo from '@mh-cbon/sudo-fs';
+import nodeDisks from 'nodejs-disks';
 
-const PATH = '/etc/fstab',
-    CMD = 'diskutil list',
-    CHMOD_CMD = ['chmod', '755', '/etc/fstab'],
-    SUDO_OPTIONS = {
-		cachePassword: false,
-	    spawnOptions: {
-	    	stdio: 'pipe'
-	    }
-    };
+import { 
+    readFsTab, 
+    addToFsTab, 
+    deleteFsTabItem 
+} from '@/python';
 
-let cacheList = [];
+const PYTHON_MODULE = 'main';
 
-const execPromise = (cmd) => {
+let cacheList = [],
+    loading;
+
+const mountToName = (mountpoint) => {
+    const arr = mountpoint.split('/'),
+        { length } = arr;
+    return arr[length - 1];
+};
+
+const getDisks = () => {
     return new Promise((resolve) => {
         try {
-            cp.exec(cmd, (error, stdout, stderr) => {
+            nodeDisks.drives((error, drives) => {
                 if (error) {
                     resolve({
                         success: false,
-                        ...error
+                        error
                     });
-                } else {
-                    resolve({
-                        success: true,
-                        stdout
-                    });
+                    return;
                 }
+                nodeDisks.drivesDetail(drives, async(error, disks) => {
+                    const mounted = await readFsTab(PYTHON_MODULE);
+                    if (!mounted.success) {
+                        resolve(mounted);
+                        return;
+                    }
+                    disks = disks.filter((disk) => {
+                        return (disk.mountpoint !== '/') && (disk.mountpoint.indexOf('private') === -1);
+                    }).map((disk) => {
+                        disk.name = mountToName(disk.mountpoint);
+                        disk.size = [parseFloat(disk.total.replace(' GB')).toFixed(1), 'GB'].join(' ');
+                        disk.mounted = mounted.res.indexOf(disk.name) !== -1;
+                        return disk;
+                    });
+
+                    setTimeout(() => {
+                        resolve({
+                            success: true,
+                            disks
+                        });
+                    }, 1000);
+                });
             });
         } catch (error) {
             resolve({
                 success: false,
-                ...error
+                error
             });
         }
     });
 };
 
-const chmodSpawn = (cmd, password) => {
-    return new Promise((resolve) => {
-        try {
-        	const spawn = sudo(cmd, SUDO_OPTIONS);
-            spawn.stdout.on("data", (data) => {
-                spawn.stdin.write(`${password}\n`);
-            });
-
-            spawn.stderr.on("data", (data) => {
-                spawn.stdin.write(`${password}\n`);
-            });
-            spawn.on("close", (code) => {
-                switch (code) {
-                	case 0:
-                		resolve({
-                			success: true
-                		});
-                	break;
-
-                	default:
-                		resolve({
-                			success: false
-                		});
-                	break;
-                }
-            });
-        } catch (error) {
-            resolve({
-                success: false,
-                ...error
-            });
-        }
-    });
-};
-
-const fileToString = (path) => {
-    try {
-        const stream = fs.readFileSync(path);
-        return {
-            success: true,
-            content: stream.toString()
-        };
-    } catch (error) {
-        return {
-            success: false,
-            ...error
-        };
-    }
-};
-
-const getNtfsDisks = (disks) => {
-    return disks.filter((disk) => {
-        for (let i = 0, { length } = disk; i < length; i++) {
-            if (disk[i] === 'Windows_NTFS') {
-                return true;
-            }
-        }
-        return false;
-    });
-};
-
-const parseDiskList = (diskList) => {
-    try {
-        const str = diskList.stdout,
-            disks = str.split(/\n/g).filter((disk) => {
-                return disk.length > 0;
-            }).map((disk) => {
-                disk = disk.split(/ +/g);
-                return disk;
-            }),
-            res = getNtfsDisks(disks);
-        return {
-            success: true,
-            res: res.map((item) => ({
-                name: item[3],
-                size: item[4]
-            }))
-        };
-    } catch (error) {
-        return {
-            success: false,
-            ...error
-        }
-    }
-};
-
-const parseFstab = (str) => {
-    const res = [];
-    cacheList = str.split(/\n/g).filter((item) => {
-        return item.length;
-    });
-    str.split(/\n/g).forEach((item) => {
-        if (item.length) {
-            item = item.split(' ')[0];
-            item = item.split('=')[1];
-            res.push(item);
-        }
-    });
-    return res;
-};
-
-const arrayToFile = (arr) => {
-	return new Promise((resolve) => {
-	    try {
-	        const str = (arr.length > 0) ? arr.join('\n') : '';
-	        fs.writeFileSync(PATH, str);
-	        resolve({
-	        	success: true
-	        });
-	    } catch (error) {
-	    	console.log(error);
-	        resolve({
-	        	success: true,
-	        	...error
-	        });
-	    }
-	});
-};
-
-const processWhiteSpace = (name) => name.replace(/\ /g, '\\040');
-
-const replaceWhiteSpace = (name) => name.replace(/\\40/g, ' ');
+const processWhiteSpace = (name) => (name.replace(/\ /g, '\\40'));
 
 export default {
     name: 'landing-page',
     methods: {
         cancelMount(item) {
-        	this.$prompt('登录密码', '请输入登录密码', {
-				confirmButtonText: '确定',
-	          	cancelButtonText: '取消'
-        	}).then(async({ value }) => {
-                const { row, $index } = item,
-                appendArr = [].concat(cacheList).filter((cfg) => {
-                	return cfg.indexOf(`LABEL=${processWhiteSpace(item.row.name)}`) === -1;
-                });
-                let write, chmod;
-
-                console.log(appendArr);
-
-                chmod = await chmodSpawn(CHMOD_CMD, value);
-                write = await arrayToFile(appendArr);
-
-                console.log(write);
-
-                if(!chmod.success) {
-	                this.$notify.error({
-	                    title: '错误',
-	                    message: '您输入的密码不正确!'
-	                });
-                	return;
+            const { name } = item.row;
+            this.$confirm(`此操作将导致您无法继续往${name}上写入任何内容, 是否继续?`, '提示', {
+                confirmButtonText: '确定',
+                cancelButtonText: '取消',
+                type: 'warning'
+            }).then(async () => {
+                this.operating = true;
+                const res = await deleteFsTabItem(PYTHON_MODULE, [name]);
+                this.operating = false;
+                if  (res.success) {
+                    this.$notify({
+                        title: '提示',
+                        type: 'success',
+                        duration: 1500,
+                        message: '取消挂载成功!'
+                    });
+                } else {
+                    this.$notify({
+                        title: '错误',
+                        type: 'error',
+                        duration: 1500,
+                        message: '操作失败, 请重试!'
+                    });
                 }
-
-        	}).catch((e) => {
-        		console.log(e);
-                this.$notify.error({
-                    title: '错误',
-                    message: '您取消了操作!'
+            }).catch(() => {
+                this.$notify.info({
+                    title: '提示',
+                    duration: 1500,
+                    message: '你取消了本次操作!'
                 });
-        	});
-        },
-        mountDisk(item) {
-            this.$prompt('登录密码', {
-                inputPlaceholder: '请输入登录密码',
-                callback: async(action, instance) => {
-                    switch (action) {
-                        case 'confirm':
-                            const { row, $index } = item,
-                            appendArr = [].concat(cacheList);
-                            let write, chmod;
-
-                            appendArr.push(`LABEL=${processWhiteSpace(item.row.name)} none ntfs rw,auto,nobrowse`);
-                            chmod = await chmodSpawn(CHMOD_CMD);
-                            break;
-
-                        default:
-                            this.$notify.error({
-                                title: '错误',
-                                message: '您取消了操作!'
-                            });
-                            break;
-                    }
-                    console.log(action, instance);
-                }
             });
         },
+        async mountDisk(item) {
+            this.operating = true;
+            const { name } = item.row,
+                res = await addToFsTab(PYTHON_MODULE, [name]);
+            this.operating = false;
+        },
         async init() {
-	        const diskList = await execPromise(CMD),
-	            content = fileToString(PATH);
-	        let parsed, mounted;
-	        if (diskList.success && content.success) {
-	            parsed = parseDiskList(diskList);
-	            mounted = parseFstab(content.content);
-	            this.diskList = parsed.res.map((item) => {
-	                item.mounted = false;
-	                if (mounted.indexOf(item.name) > -1) {
-	                    item.mounted = true;
-	                }
-	                item.size = /GB$/.test(item.size) ? item.size : [item.size, 'GB'].join(' ');
-	                item.progress = 50;
-	                return item;
-	            });
-	        }
+            this.reading = true;
+            const disk = await getDisks();
+            if (disk.success) {
+                this.diskList = disk.disks;
+                this.reading = false;
+                this.error = false;
+            } else {
+                this.diskList = [];
+                this.reading = false;
+                this.error = true;
+            }
         }
     },
     data() {
         return {
             diskList: [],
             reading: false,
+            operating: false,
             error: false
         };
     },
+    watch: {
+        reading() {
+            const { reading } = this;
+            if (reading) {
+                loading = this.$loading({
+                    lock: true,
+                    text: '正在读取外部硬盘列表, 请稍候!',
+                    spinner: 'el-icon-loading',
+                    background: 'rgba(0, 0, 0, 0.7)'
+                });
+            } else {
+                if (loading) {
+                    loading.close();
+                }
+            }
+        },
+        operating() {
+            const { operating } = this;
+            if (operating) {
+                loading = this.$loading({
+                    lock: true,
+                    text: '正在操作, 请稍候!',
+                    spinner: 'el-icon-loading',
+                    background: 'rgba(0, 0, 0, 0.7)'
+                });
+            } else {
+                if (loading) {
+                    loading.close();
+                }
+            }
+        }
+    },
     async created() {
-    	await this.init();
+        await this.init();
     }
 };

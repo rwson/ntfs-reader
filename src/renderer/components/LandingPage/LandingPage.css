@@ -17,3 +17,36 @@
 	width: 90%!important;
 	max-width: 420px;
 }
+
+.el-icon-loading:before {
+	font-size: 36px;
+	color: #fff;
+}
+
+.el-loading-spinner .el-loading-text {
+	color: #fff;
+}
+
+.error-ico {
+	width: 50px;
+	height: 50px;
+	background: url(../../assets/cry.png) no-repeat center;
+	background-size: 50px 50px;
+	margin: 30px auto 15px;
+}
+
+.error-description {
+    font-size: 14px;
+    line-height: 28px;
+    color: #888;
+    text-align: center;
+}
+
+.error-button {
+	margin: 10px 0 0 0;
+	text-align: center;
+}
+
+.error-button .el-button {
+	color: #888;
+}
